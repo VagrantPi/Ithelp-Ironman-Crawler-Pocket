@@ -1,14 +1,13 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-
-const url = process.argv.slice(2)[0]
+const config = require('./config.json')
 
 const getQuery = (url = '') => {
   const format = url.split('?page=')
   return format[0]
 }
 
-const parseParsePage = async (url, page = 1) => {
+const parseParsePage = async (url, tags, page = 1) => {
   const result = [];
   if (!url) return result;
 
@@ -33,20 +32,54 @@ const parseParsePage = async (url, page = 1) => {
 
 
         const title = postItem.text().trim()
-        const link = postItem.attr("href").trim()
-        result.push({ title, link })
+        const url = postItem.attr("href").trim()
+        result.push({
+          action : 'add',
+          title,
+          url,
+          tags
+        })
     });
 
   if (!paginationItem.children()
     || (paginationItem.children().length - 2) <= page) return result
 
-  const nextPage = await parseParsePage(`${getQuery(url)}?page=${page + 1}`, page + 1)
+  const nextPage = await parseParsePage(`${getQuery(url)}?page=${page + 1}`, tags, page + 1)
   return [...result, ...nextPage]
 }
 
 const main = async () => {
-  const pageList = await parseParsePage(url)
-  console.log(pageList);
+  const [url, tags = ''] = process.argv.slice(2)
+
+  if (!config.pocket.consumer_key || !config.pocket.access_token) {
+    console.log('pocket key not set!');
+    return;
+  }
+
+  const pageList = await parseParsePage(url, tags)
+
+  const pocketResponse = await axios.post('https://getpocket.com/v3/send', {
+    consumer_key: config.pocket.consumer_key,
+    access_token: config.pocket.access_token,
+    actions: pageList
+  })
+
+
+  if (!pocketResponse) {
+    console.log(pocketResponse);
+    return
+  }
+
+  console.log('Pocket List:');
+  console.log('==============================');
+  pocketResponse.data.action_results.forEach(result => {
+    console.log(`${result.title}: https://getpocket.com/read/${result.item_id}`);
+  });
+
+  console.log();
+  console.log('action_errors');
+  console.log('==============================');
+  console.log(pocketResponse.data.action_errors);
 }
 
 main()
